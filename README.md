@@ -1,2 +1,10 @@
 # Shell-project
-this is the 42sh project. it aims to create a complete linux shell with C.
+This project creates a POSIX shell with C.
+
+## Build
+```bash
+mkdir -p build
+cd build
+cmake ..
+make
+```
