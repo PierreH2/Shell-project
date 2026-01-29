@@ -1,5 +1,6 @@
 # make
 /build/
+/debug/
 
 # Prerequisites
 *.d

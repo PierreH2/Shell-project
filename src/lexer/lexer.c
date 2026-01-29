@@ -24,7 +24,8 @@ void token_free(struct token *t)
 
 static int is_word_break(int c)
 {
-    return c == EOF || c == ';' || c == '\n' || c == ' ' || c == '\t';
+    return c == EOF || c == ';' || c == '\n' || c == ' ' || c == '\t'
+           || c == '<' || c == '>';
 }
 
 static int lx_getc(struct lexer *lx)
@@ -109,6 +110,84 @@ static void read_single_quotes(struct lexer *lx, struct str *sb, int start_line,
     }
 }
 
+static struct token lex_redir_or_ionumber(struct lexer *lx)
+{
+    int c = lx_getc(lx);
+    int line = lx->line;
+    int col = lx->col;
+
+    /* Check for IO number: [0-9]+ followed by a redirection operator */
+    if (isdigit(c)) {
+        struct str num;
+        str_init(&num);
+        str_pushc(&num, (char)c);
+
+        int next;
+        while (1) {
+            next = lx_getc(lx);
+            if (isdigit(next)) {
+                str_pushc(&num, (char)next);
+            } else {
+                lx_ungetc(lx, next);
+                break;
+            }
+        }
+
+        /* Check if next char is a redirection operator */
+        next = lx_getc(lx);
+        if (next == '<' || next == '>') {
+            /* This is an IO number */
+            lx_ungetc(lx, next);
+            char *ionum = str_take(&num);
+            str_free(&num);
+            lx->at_cmd_start = 0;
+            return make_tok(lx, TOK_IONUMBER, ionum, line, col);
+        } else {
+            /* Not an IO number, treat as word */
+            lx_ungetc(lx, next);
+            char *word = str_take(&num);
+            str_free(&num);
+            lx->at_cmd_start = 0;
+            return make_tok(lx, TOK_WORD, word, line, col);
+        }
+    } else if (c == '<') {
+        /* < or <& or <> */
+        int next = lx_getc(lx);
+        if (next == '&') {
+            lx->at_cmd_start = 0;
+            return make_tok(lx, TOK_REDIR_IN_ERR, NULL, line, col);
+        } else if (next == '>') {
+            lx->at_cmd_start = 0;
+            return make_tok(lx, TOK_REDIR_RDWR, NULL, line, col);
+        } else {
+            lx_ungetc(lx, next);
+            lx->at_cmd_start = 0;
+            return make_tok(lx, TOK_REDIR_IN, NULL, line, col);
+        }
+    } else if (c == '>') {
+        /* > or >> or >& or >| */
+        int next = lx_getc(lx);
+        if (next == '>') {
+            lx->at_cmd_start = 0;
+            return make_tok(lx, TOK_REDIR_APPEND, NULL, line, col);
+        } else if (next == '&') {
+            lx->at_cmd_start = 0;
+            return make_tok(lx, TOK_REDIR_OUT_ERR, NULL, line, col);
+        } else if (next == '|') {
+            lx->at_cmd_start = 0;
+            return make_tok(lx, TOK_REDIR_CLOBBER, NULL, line, col);
+        } else {
+            lx_ungetc(lx, next);
+            lx->at_cmd_start = 0;
+            return make_tok(lx, TOK_REDIR_OUT, NULL, line, col);
+        }
+    }
+
+    lx_ungetc(lx, c);
+    syntax_error(line, col, "invalid redirection operator");
+    return make_tok(lx, TOK_EOF, NULL, line, col);
+}
+
 static struct token lex_word(struct lexer *lx)
 {
     int start_line = lx->line;
@@ -187,6 +266,12 @@ static struct token lex_one(struct lexer *lx)
     if (c == '\n') {
         lx->at_cmd_start = 1;
         return make_tok(lx, TOK_NL, NULL, line, col);
+    }
+
+    /* Check for redirections or IO numbers */
+    if (c == '<' || c == '>' || isdigit(c)) {
+        lx_ungetc(lx, c);
+        return lex_redir_or_ionumber(lx);
     }
 
     lx_ungetc(lx, c);

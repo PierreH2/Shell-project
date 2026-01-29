@@ -9,12 +9,33 @@ static void free_argv(char **argv)
     free(argv);
 }
 
+static void free_redirs(struct redirection *redirs, size_t len)
+{
+    if (!redirs) return;
+    for (size_t i = 0; i < len; i++)
+        free(redirs[i].target);
+    free(redirs);
+}
+
 struct ast *ast_new_simple(char **argv)
 {
     struct ast *n = calloc(1, sizeof(*n));
     if (!n) abort();
     n->type = AST_SIMPLE;
     n->as.simple.argv = argv;
+    n->as.simple.redirs = NULL;
+    n->as.simple.redir_len = 0;
+    return n;
+}
+
+struct ast *ast_new_simple_with_redirs(char **argv, struct redirection *redirs, size_t redir_len)
+{
+    struct ast *n = calloc(1, sizeof(*n));
+    if (!n) abort();
+    n->type = AST_SIMPLE;
+    n->as.simple.argv = argv;
+    n->as.simple.redirs = redirs;
+    n->as.simple.redir_len = redir_len;
     return n;
 }
 
@@ -50,6 +71,7 @@ void ast_free(struct ast *n)
 
     if (n->type == AST_SIMPLE) {
         free_argv(n->as.simple.argv);
+        free_redirs(n->as.simple.redirs, n->as.simple.redir_len);
     } else if (n->type == AST_LIST) {
         for (size_t i = 0; i < n->as.list.len; i++)
             ast_free(n->as.list.items[i]);

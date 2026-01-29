@@ -3,6 +3,7 @@
 #include "util/vec.h"
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 static int is_sep(enum token_type t)
 {
@@ -15,6 +16,13 @@ static int is_stop(enum token_type t, int stop_then, int stop_else, int stop_fi)
     if (stop_else && (t == TOK_ELIF || t == TOK_ELSE)) return 1;
     if (stop_fi && t == TOK_FI) return 1;
     return 0;
+}
+
+static int is_redir_token(enum token_type t)
+{
+    return t == TOK_REDIR_IN || t == TOK_REDIR_OUT || t == TOK_REDIR_APPEND
+        || t == TOK_REDIR_CLOBBER || t == TOK_REDIR_OUT_ERR || t == TOK_REDIR_IN_ERR
+        || t == TOK_REDIR_RDWR;
 }
 
 static void expect(struct lexer *lx, enum token_type type, const char *msg)
@@ -30,10 +38,38 @@ static void expect(struct lexer *lx, enum token_type type, const char *msg)
 
 static struct ast *parse_command(struct lexer *lx);
 
+static enum redir_type token_to_redir_type(enum token_type t)
+{
+    switch (t) {
+        case TOK_REDIR_IN:      return REDIR_IN;
+        case TOK_REDIR_OUT:     return REDIR_OUT;
+        case TOK_REDIR_APPEND:  return REDIR_APPEND;
+        case TOK_REDIR_CLOBBER: return REDIR_CLOBBER;
+        case TOK_REDIR_OUT_ERR: return REDIR_OUT_ERR;
+        case TOK_REDIR_IN_ERR:  return REDIR_IN_ERR;
+        case TOK_REDIR_RDWR:    return REDIR_RDWR;
+        default:                return REDIR_IN; /* shouldn't happen */
+    }
+}
+
+static int default_fd_for_redir(enum redir_type type)
+{
+    switch (type) {
+        case REDIR_IN:
+        case REDIR_IN_ERR:
+        case REDIR_RDWR:
+            return 0;   /* stdin */
+        default:
+            return 1;   /* stdout */
+    }
+}
+
 static struct ast *parse_simple_command(struct lexer *lx, struct token first)
 {
     struct vec args;
+    struct vec redirs;
     vec_init(&args);
+    vec_init(&redirs);
 
     if (first.type != TOK_WORD) {
         int line = first.line, col = first.col;
@@ -46,13 +82,62 @@ static struct ast *parse_simple_command(struct lexer *lx, struct token first)
 
     while (1) {
         struct token t = lexer_peek(lx);
-        if (t.type != TOK_WORD)
-            break;
+        
+        if (t.type == TOK_WORD) {
+            t = lexer_next(lx);
+            vec_push(&args, t.value);
+            t.value = NULL;
+            token_free(&t);
+        } else if (t.type == TOK_IONUMBER) {
+            /* IONumber redirect */
+            t = lexer_next(lx);
+            int ionum = atoi(t.value);
+            token_free(&t);
 
-        t = lexer_next(lx);
-        vec_push(&args, t.value);
-        t.value = NULL;
-        token_free(&t);
+            struct token redir_tok = lexer_next(lx);
+            if (!is_redir_token(redir_tok.type)) {
+                int line = redir_tok.line, col = redir_tok.col;
+                token_free(&redir_tok);
+                syntax_error(line, col, "expected redirection operator");
+            }
+
+            struct token target_tok = lexer_next(lx);
+            if (target_tok.type != TOK_WORD) {
+                int line = target_tok.line, col = target_tok.col;
+                token_free(&target_tok);
+                syntax_error(line, col, "expected redirection target");
+            }
+
+            struct redirection *r = calloc(1, sizeof(struct redirection));
+            if (!r) abort();
+            r->type = token_to_redir_type(redir_tok.type);
+            r->target = target_tok.value;
+            r->fd = ionum;
+            vec_push(&redirs, r);
+
+            token_free(&redir_tok);
+        } else if (is_redir_token(t.type)) {
+            /* Simple redirect without IONumber */
+            t = lexer_next(lx);
+            enum redir_type rtype = token_to_redir_type(t.type);
+            token_free(&t);
+
+            struct token target_tok = lexer_next(lx);
+            if (target_tok.type != TOK_WORD) {
+                int line = target_tok.line, col = target_tok.col;
+                token_free(&target_tok);
+                syntax_error(line, col, "expected redirection target");
+            }
+
+            struct redirection *r = calloc(1, sizeof(struct redirection));
+            if (!r) abort();
+            r->type = rtype;
+            r->target = target_tok.value;
+            r->fd = default_fd_for_redir(rtype);
+            vec_push(&redirs, r);
+        } else {
+            break;
+        }
     }
 
     // build argv null-terminated
@@ -62,8 +147,27 @@ static struct ast *parse_simple_command(struct lexer *lx, struct token first)
         argv[i] = (char *)vec_get(&args, i);
     argv[args.len] = NULL;
 
+    // build redirs array
+    struct redirection *redirs_arr = NULL;
+    size_t redirs_len = 0;
+    if (redirs.len > 0) {
+        redirs_arr = calloc(redirs.len, sizeof(struct redirection));
+        if (!redirs_arr) abort();
+        for (size_t i = 0; i < redirs.len; i++) {
+            struct redirection *src = (struct redirection *)vec_get(&redirs, i);
+            redirs_arr[i] = *src;
+            free(src);  // Free the heap-allocated redirections from vector
+        }
+        redirs_len = redirs.len;
+    }
+
     vec_free(&args);
-    return ast_new_simple(argv);
+    vec_free(&redirs);
+
+    if (redirs_len > 0)
+        return ast_new_simple_with_redirs(argv, redirs_arr, redirs_len);
+    else
+        return ast_new_simple(argv);
 }
 
 static struct ast *parse_compound_list(struct lexer *lx,

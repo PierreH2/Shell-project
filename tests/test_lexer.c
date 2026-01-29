@@ -79,3 +79,143 @@ Test(lexer_eof, only_spaces)
 
     cr_assert_eq(tok.type, TOK_EOF);
 }
+// Redirections
+Test(lexer_redirections, output_redirection)
+{
+    struct lexer lx = make_lexer("echo hello > file.txt");
+
+    struct token t1 = lexer_next(&lx);
+    struct token t2 = lexer_next(&lx);
+    struct token t3 = lexer_next(&lx);
+    struct token t4 = lexer_next(&lx);
+
+    cr_assert_eq(t1.type, TOK_WORD);
+    cr_assert_eq(t2.type, TOK_WORD);
+    cr_assert_eq(t3.type, TOK_REDIR_OUT);
+    cr_assert_eq(t4.type, TOK_WORD);
+    cr_assert_str_eq(t4.value, "file.txt");
+}
+
+Test(lexer_redirections, input_redirection)
+{
+    struct lexer lx = make_lexer("cat < input.txt");
+
+    struct token t1 = lexer_next(&lx);
+    struct token t2 = lexer_next(&lx);
+    struct token t3 = lexer_next(&lx);
+
+    cr_assert_eq(t1.type, TOK_WORD);
+    cr_assert_eq(t2.type, TOK_REDIR_IN);
+    cr_assert_eq(t3.type, TOK_WORD);
+}
+
+Test(lexer_redirections, append_redirection)
+{
+    struct lexer lx = make_lexer("echo data >> file.txt");
+
+    struct token t1 = lexer_next(&lx);
+    struct token t2 = lexer_next(&lx);
+    struct token t3 = lexer_next(&lx);
+    struct token t4 = lexer_next(&lx);
+
+    cr_assert_eq(t1.type, TOK_WORD);
+    cr_assert_eq(t2.type, TOK_WORD);  // "data"
+    cr_assert_eq(t3.type, TOK_REDIR_APPEND);
+    cr_assert_eq(t4.type, TOK_WORD);
+}
+
+Test(lexer_redirections, clobber_redirection)
+{
+    struct lexer lx = make_lexer("echo data >| file.txt");
+
+    struct token t1 = lexer_next(&lx);
+    struct token t2 = lexer_next(&lx);
+    struct token t3 = lexer_next(&lx);
+    struct token t4 = lexer_next(&lx);
+
+    cr_assert_eq(t1.type, TOK_WORD);
+    cr_assert_eq(t2.type, TOK_WORD);  // "data"
+    cr_assert_eq(t3.type, TOK_REDIR_CLOBBER);
+    cr_assert_eq(t4.type, TOK_WORD);
+}
+
+Test(lexer_redirections, rdwr_redirection)
+{
+    struct lexer lx = make_lexer("command <> file.txt");
+
+    struct token t1 = lexer_next(&lx);
+    struct token t2 = lexer_next(&lx);
+    struct token t3 = lexer_next(&lx);
+
+    cr_assert_eq(t1.type, TOK_WORD);
+    cr_assert_eq(t2.type, TOK_REDIR_RDWR);
+    cr_assert_eq(t3.type, TOK_WORD);
+}
+
+Test(lexer_redirections, out_err_redirection)
+{
+    struct lexer lx = make_lexer("cmd >& file.txt");
+
+    struct token t1 = lexer_next(&lx);
+    struct token t2 = lexer_next(&lx);
+    struct token t3 = lexer_next(&lx);
+
+    cr_assert_eq(t1.type, TOK_WORD);
+    cr_assert_eq(t2.type, TOK_REDIR_OUT_ERR);
+    cr_assert_eq(t3.type, TOK_WORD);
+}
+
+Test(lexer_redirections, in_err_redirection)
+{
+    struct lexer lx = make_lexer("cmd <& fd");
+
+    struct token t1 = lexer_next(&lx);
+    struct token t2 = lexer_next(&lx);
+    struct token t3 = lexer_next(&lx);
+
+    cr_assert_eq(t1.type, TOK_WORD);
+    cr_assert_eq(t2.type, TOK_REDIR_IN_ERR);
+    cr_assert_eq(t3.type, TOK_WORD);
+}
+
+Test(lexer_redirections, ionumber_token)
+{
+    struct lexer lx = make_lexer("echo 2> error.txt");
+
+    struct token t1 = lexer_next(&lx);
+    struct token t2 = lexer_next(&lx);
+    struct token t3 = lexer_next(&lx);
+
+    cr_assert_eq(t1.type, TOK_WORD);
+    cr_assert_eq(t2.type, TOK_IONUMBER);
+    cr_assert_str_eq(t2.value, "2");
+    cr_assert_eq(t3.type, TOK_REDIR_OUT);
+}
+
+Test(lexer_redirections, multiple_ionumber_digits)
+{
+    struct lexer lx = make_lexer("echo 123> file.txt");
+
+    struct token t1 = lexer_next(&lx);
+    struct token t2 = lexer_next(&lx);
+    struct token t3 = lexer_next(&lx);
+
+    cr_assert_eq(t1.type, TOK_WORD);
+    cr_assert_eq(t2.type, TOK_IONUMBER);
+    cr_assert_str_eq(t2.value, "123");
+    cr_assert_eq(t3.type, TOK_REDIR_OUT);
+}
+
+Test(lexer_redirections, number_without_redir_is_word)
+{
+    struct lexer lx = make_lexer("echo 42 hello");
+
+    struct token t1 = lexer_next(&lx);
+    struct token t2 = lexer_next(&lx);
+    struct token t3 = lexer_next(&lx);
+
+    cr_assert_eq(t1.type, TOK_WORD);
+    cr_assert_eq(t2.type, TOK_WORD);
+    cr_assert_str_eq(t2.value, "42");
+    cr_assert_eq(t3.type, TOK_WORD);
+}

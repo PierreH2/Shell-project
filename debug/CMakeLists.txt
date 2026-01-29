@@ -4,6 +4,8 @@ add_executable(lexer_dbg
 
 target_link_libraries(lexer_dbg
     lexer
+    parser
+    executer
     util
 )
 
