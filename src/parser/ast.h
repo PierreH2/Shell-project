@@ -6,7 +6,8 @@
 enum ast_type {
     AST_SIMPLE,
     AST_LIST,
-    AST_IF
+    AST_IF,
+    AST_PIPELINE
 };
 
 enum redir_type {
@@ -49,12 +50,18 @@ struct ast_if {
     struct ast *else_branch; // optional
 };
 
+struct ast_pipeline {
+    struct ast **commands;  /* Array of commands in the pipeline */
+    size_t len;             /* Number of commands */
+};
+
 struct ast {
     enum ast_type type;
     union {
         struct ast_simple simple;
         struct ast_list list;
         struct ast_if ifnode;
+        struct ast_pipeline pipeline;
     } as;
 };
 
@@ -64,6 +71,7 @@ struct ast *ast_new_list(struct ast **items, size_t len);
 struct ast *ast_new_if(struct ast *cond, struct ast *then_branch,
                        struct ast **elif_conds, struct ast **elif_thens, size_t elif_len,
                        struct ast *else_branch);
+struct ast *ast_new_pipeline(struct ast **commands, size_t len);
 
 void ast_free(struct ast *n);
 

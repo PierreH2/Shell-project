@@ -25,7 +25,7 @@ void token_free(struct token *t)
 static int is_word_break(int c)
 {
     return c == EOF || c == ';' || c == '\n' || c == ' ' || c == '\t'
-           || c == '<' || c == '>';
+           || c == '<' || c == '>' || c == '|';
 }
 
 static int lx_getc(struct lexer *lx)
@@ -266,6 +266,13 @@ static struct token lex_one(struct lexer *lx)
     if (c == '\n') {
         lx->at_cmd_start = 1;
         return make_tok(lx, TOK_NL, NULL, line, col);
+    }
+
+    if (c == '|') {
+        /* Check if it's part of >| */
+        /* This case should not happen here because >| is handled in lex_redir_or_ionumber */
+        lx->at_cmd_start = 0;
+        return make_tok(lx, TOK_PIPE, NULL, line, col);
     }
 
     /* Check for redirections or IO numbers */

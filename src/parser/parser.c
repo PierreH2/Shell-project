@@ -38,6 +38,59 @@ static void expect(struct lexer *lx, enum token_type type, const char *msg)
 
 static struct ast *parse_command(struct lexer *lx);
 
+static struct ast *parse_pipeline(struct lexer *lx)
+{
+    struct vec commands;
+    vec_init(&commands);
+
+    /* Parse first command */
+    struct ast *cmd = parse_command(lx);
+    vec_push(&commands, cmd);
+
+    /* Parse additional commands separated by '|' */
+    while (1) {
+        struct token t = lexer_peek(lx);
+        if (t.type != TOK_PIPE)
+            break;
+
+        /* Consume the pipe */
+        t = lexer_next(lx);
+        token_free(&t);
+
+        /* Skip newlines after pipe: '|' {'\n'} */
+        while (1) {
+            t = lexer_peek(lx);
+            if (t.type == TOK_NL) {
+                t = lexer_next(lx);
+                token_free(&t);
+                continue;
+            }
+            break;
+        }
+
+        /* Parse next command */
+        cmd = parse_command(lx);
+        vec_push(&commands, cmd);
+    }
+
+    /* If only one command, return it directly (not a pipeline) */
+    if (commands.len == 1) {
+        cmd = (struct ast *)vec_get(&commands, 0);
+        vec_free(&commands);
+        return cmd;
+    }
+
+    /* Build pipeline AST */
+    struct ast **arr = calloc(commands.len, sizeof(struct ast *));
+    if (!arr) abort();
+    for (size_t i = 0; i < commands.len; i++)
+        arr[i] = (struct ast *)vec_get(&commands, i);
+
+    size_t len = commands.len;
+    vec_free(&commands);
+    return ast_new_pipeline(arr, len);
+}
+
 static enum redir_type token_to_redir_type(enum token_type t)
 {
     switch (t) {
@@ -193,7 +246,7 @@ static struct ast *parse_compound_list(struct lexer *lx,
         if (p.type == TOK_EOF || is_stop(p.type, stop_then, stop_else, stop_fi))
             break;
 
-        struct ast *cmd = parse_command(lx);
+        struct ast *cmd = parse_pipeline(lx);
         vec_push(&items, cmd);
 
         // consume any separators

@@ -65,6 +65,16 @@ struct ast *ast_new_if(struct ast *cond, struct ast *then_branch,
     return n;
 }
 
+struct ast *ast_new_pipeline(struct ast **commands, size_t len)
+{
+    struct ast *n = calloc(1, sizeof(*n));
+    if (!n) abort();
+    n->type = AST_PIPELINE;
+    n->as.pipeline.commands = commands;
+    n->as.pipeline.len = len;
+    return n;
+}
+
 void ast_free(struct ast *n)
 {
     if (!n) return;
@@ -86,6 +96,10 @@ void ast_free(struct ast *n)
         free(n->as.ifnode.elif_conds);
         free(n->as.ifnode.elif_thens);
         ast_free(n->as.ifnode.else_branch);
+    } else if (n->type == AST_PIPELINE) {
+        for (size_t i = 0; i < n->as.pipeline.len; i++)
+            ast_free(n->as.pipeline.commands[i]);
+        free(n->as.pipeline.commands);
     }
 
     free(n);

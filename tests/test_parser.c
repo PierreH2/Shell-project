@@ -219,3 +219,106 @@ Test(parser, syntax_error_missing_fi, .exit_code = 2)
 {
     parse_from_str("if true; then echo fail");
 }
+
+Test(parser, simple_pipeline)
+{
+    struct ast *ast = parse_from_str("echo hello | cat");
+
+    cr_assert_eq(ast->type, AST_LIST);
+    cr_assert_eq(ast->as.list.len, 1);
+
+    struct ast *pipe = ast->as.list.items[0];
+    cr_assert_eq(pipe->type, AST_PIPELINE);
+    cr_assert_eq(pipe->as.pipeline.len, 2);
+
+    struct ast *cmd1 = pipe->as.pipeline.commands[0];
+    cr_assert_eq(cmd1->type, AST_SIMPLE);
+    cr_assert_str_eq(cmd1->as.simple.argv[0], "echo");
+    cr_assert_str_eq(cmd1->as.simple.argv[1], "hello");
+
+    struct ast *cmd2 = pipe->as.pipeline.commands[1];
+    cr_assert_eq(cmd2->type, AST_SIMPLE);
+    cr_assert_str_eq(cmd2->as.simple.argv[0], "cat");
+
+    ast_free(ast);
+}
+
+Test(parser, three_command_pipeline)
+{
+    struct ast *ast = parse_from_str("cat file.txt | grep test | wc");
+
+    cr_assert_eq(ast->type, AST_LIST);
+    struct ast *pipe = ast->as.list.items[0];
+    cr_assert_eq(pipe->type, AST_PIPELINE);
+    cr_assert_eq(pipe->as.pipeline.len, 3);
+
+    cr_assert_str_eq(pipe->as.pipeline.commands[0]->as.simple.argv[0], "cat");
+    cr_assert_str_eq(pipe->as.pipeline.commands[1]->as.simple.argv[0], "grep");
+    cr_assert_str_eq(pipe->as.pipeline.commands[2]->as.simple.argv[0], "wc");
+
+    ast_free(ast);
+}
+
+Test(parser, pipeline_with_newline_after_pipe)
+{
+    struct ast *ast = parse_from_str("echo test |\n cat");
+
+    cr_assert_eq(ast->type, AST_LIST);
+    struct ast *pipe = ast->as.list.items[0];
+    cr_assert_eq(pipe->type, AST_PIPELINE);
+    cr_assert_eq(pipe->as.pipeline.len, 2);
+
+    ast_free(ast);
+}
+
+Test(parser, pipeline_with_multiple_newlines)
+{
+    struct ast *ast = parse_from_str("echo test |\n\n\n cat");
+
+    cr_assert_eq(ast->type, AST_LIST);
+    struct ast *pipe = ast->as.list.items[0];
+    cr_assert_eq(pipe->type, AST_PIPELINE);
+    cr_assert_eq(pipe->as.pipeline.len, 2);
+
+    ast_free(ast);
+}
+
+Test(parser, pipeline_with_redirections)
+{
+    struct ast *ast = parse_from_str("cat < input.txt | grep test > output.txt");
+
+    cr_assert_eq(ast->type, AST_LIST);
+    struct ast *pipe = ast->as.list.items[0];
+    cr_assert_eq(pipe->type, AST_PIPELINE);
+    cr_assert_eq(pipe->as.pipeline.len, 2);
+
+    /* First command has input redirection */
+    struct ast *cmd1 = pipe->as.pipeline.commands[0];
+    cr_assert_eq(cmd1->as.simple.redir_len, 1);
+    cr_assert_eq(cmd1->as.simple.redirs[0].type, REDIR_IN);
+
+    /* Second command has output redirection */
+    struct ast *cmd2 = pipe->as.pipeline.commands[1];
+    cr_assert_eq(cmd2->as.simple.redir_len, 1);
+    cr_assert_eq(cmd2->as.simple.redirs[0].type, REDIR_OUT);
+
+    ast_free(ast);
+}
+
+Test(parser, pipeline_in_list)
+{
+    struct ast *ast = parse_from_str("echo a | cat; echo b | cat");
+
+    cr_assert_eq(ast->type, AST_LIST);
+    cr_assert_eq(ast->as.list.len, 2);
+
+    struct ast *pipe1 = ast->as.list.items[0];
+    cr_assert_eq(pipe1->type, AST_PIPELINE);
+    cr_assert_eq(pipe1->as.pipeline.len, 2);
+
+    struct ast *pipe2 = ast->as.list.items[1];
+    cr_assert_eq(pipe2->type, AST_PIPELINE);
+    cr_assert_eq(pipe2->as.pipeline.len, 2);
+
+    ast_free(ast);
+}

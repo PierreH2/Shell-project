@@ -226,4 +226,149 @@ Test(e2e, ionumber_redirection)
     fclose(f);
 
     cr_assert(strstr(buf, "output via fd1") != NULL);
-    unlink(tmpfile);}
+    unlink(tmpfile);
+}
+
+// Pipeline tests
+Test(e2e, simple_pipeline, .init = redirect_all)
+{
+    int st = run_script("echo hello | cat");
+    cr_assert_eq(st, 0);
+    cr_assert_stdout_eq_str("hello\n");
+}
+
+Test(e2e, pipeline_exit_status_true_false)
+{
+    /* Exit status should be from last command: true | false exits 1 */
+    int st = run_script("true | false");
+    cr_assert_eq(st, 1);
+}
+
+Test(e2e, pipeline_exit_status_false_true)
+{
+    /* Exit status should be from last command: false | true exits 0 */
+    int st = run_script("false | true");
+    cr_assert_eq(st, 0);
+}
+
+Test(e2e, three_command_pipeline, .init = redirect_all)
+{
+    int st = run_script("echo 'line1\nline2\nline3' | cat | cat");
+    cr_assert_eq(st, 0);
+    cr_assert_stdout_eq_str("line1\nline2\nline3\n");
+}
+
+Test(e2e, pipeline_with_grep, .init = redirect_all)
+{
+    /* Create a test file to grep through */
+    char tmpfile[] = "/tmp/test_e2e_grep_XXXXXX";
+    int fd = mkstemp(tmpfile);
+    FILE *f = fdopen(fd, "w");
+    fprintf(f, "apple\nbanana\ncherry\n");
+    fclose(f);
+
+    char script[256];
+    snprintf(script, sizeof(script), "cat %s | grep banana", tmpfile);
+    
+    int st = run_script(script);
+    cr_assert_eq(st, 0);
+    cr_assert_stdout_eq_str("banana\n");
+    
+    unlink(tmpfile);
+}
+
+Test(e2e, pipeline_with_wc, .init = redirect_all)
+{
+    int st = run_script("echo -e 'a\nb\nc' | wc -l");
+    cr_assert_eq(st, 0);
+    /* wc -l should count 3 lines */
+}
+
+Test(e2e, long_pipeline, .init = redirect_all)
+{
+    /* Test a pipeline with many commands */
+    int st = run_script("echo test | cat | cat | cat | cat");
+    cr_assert_eq(st, 0);
+    cr_assert_stdout_eq_str("test\n");
+}
+
+Test(e2e, pipeline_with_input_redirection, .init = redirect_all)
+{
+    /* Create a test file */
+    char tmpfile[] = "/tmp/test_e2e_pipe_in_XXXXXX";
+    int fd = mkstemp(tmpfile);
+    FILE *f = fdopen(fd, "w");
+    fprintf(f, "file content\n");
+    fclose(f);
+
+    char script[256];
+    snprintf(script, sizeof(script), "cat < %s | cat", tmpfile);
+    
+    int st = run_script(script);
+    cr_assert_eq(st, 0);
+    cr_assert_stdout_eq_str("file content\n");
+    
+    unlink(tmpfile);
+}
+
+Test(e2e, pipeline_with_output_redirection)
+{
+    /* Redirect output of pipeline to a file */
+    char tmpfile[] = "/tmp/test_e2e_pipe_out_XXXXXX";
+    int fd = mkstemp(tmpfile);
+    close(fd);
+
+    char script[256];
+    snprintf(script, sizeof(script), "echo pipeline | cat > %s", tmpfile);
+    
+    int st = run_script(script);
+    cr_assert_eq(st, 0);
+
+    /* Verify file contents */
+    FILE *f = fopen(tmpfile, "r");
+    char buf[100];
+    fgets(buf, sizeof(buf), f);
+    fclose(f);
+
+    cr_assert(strstr(buf, "pipeline") != NULL);
+    unlink(tmpfile);
+}
+
+Test(e2e, pipeline_with_newlines, .init = redirect_all)
+{
+    /* Test pipeline with newlines after pipe symbol */
+    int st = run_script("echo test |\n cat");
+    cr_assert_eq(st, 0);
+    cr_assert_stdout_eq_str("test\n");
+}
+
+Test(e2e, multiple_pipelines, .init = redirect_all)
+{
+    /* Multiple pipelines in a command list */
+    int st = run_script("echo a | cat; echo b | cat");
+    cr_assert_eq(st, 0);
+    cr_assert_stdout_eq_str("a\nb\n");
+}
+
+Test(e2e, pipeline_in_if_condition, .init = redirect_all)
+{
+    /* Use pipeline in if condition */
+    int st = run_script("if true | true; then echo ok; fi");
+    cr_assert_eq(st, 0);
+    cr_assert_stdout_eq_str("ok\n");
+}
+
+Test(e2e, pipeline_builtin_true_false)
+{
+    /* Test with builtin commands */
+    int st = run_script("true | false | true");
+    cr_assert_eq(st, 0); /* Last command is true */
+}
+
+Test(e2e, pipeline_builtin_echo, .init = redirect_all)
+{
+    /* Test builtin echo in pipeline */
+    int st = run_script("echo hello | cat");
+    cr_assert_eq(st, 0);
+    cr_assert_stdout_eq_str("hello\n");
+}

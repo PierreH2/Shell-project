@@ -254,6 +254,132 @@ static int exec_if(struct ast_if *ifn)
     return 0;
 }
 
+static int exec_pipeline(struct ast_pipeline *pipeline)
+{
+    size_t n = pipeline->len;
+    if (n == 0)
+        return 0;
+
+    /* Allocate arrays for pipes and PIDs */
+    int (*pipes)[2] = NULL;
+    pid_t *pids = NULL;
+
+    if (n > 1) {
+        pipes = calloc(n - 1, sizeof(int[2]));
+        if (!pipes) {
+            perror("calloc");
+            return 1;
+        }
+    }
+
+    pids = calloc(n, sizeof(pid_t));
+    if (!pids) {
+        perror("calloc");
+        free(pipes);
+        return 1;
+    }
+
+    /* Create all pipes */
+    for (size_t i = 0; i < n - 1; i++) {
+        if (pipe(pipes[i]) < 0) {
+            perror("pipe");
+            /* Close already created pipes */
+            for (size_t j = 0; j < i; j++) {
+                close(pipes[j][0]);
+                close(pipes[j][1]);
+            }
+            free(pipes);
+            free(pids);
+            return 1;
+        }
+    }
+
+    /* Fork and execute each command */
+    for (size_t i = 0; i < n; i++) {
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            /* Close all pipes on error */
+            for (size_t j = 0; j < n - 1; j++) {
+                close(pipes[j][0]);
+                close(pipes[j][1]);
+            }
+            /* Wait for already started children */
+            for (size_t j = 0; j < i; j++) {
+                if (pids[j] > 0)
+                    waitpid(pids[j], NULL, 0);
+            }
+            free(pipes);
+            free(pids);
+            return 1;
+        }
+
+        if (pid == 0) {
+            /* Child process */
+            
+            /* Set up stdin from previous pipe */
+            if (i > 0) {
+                if (dup2(pipes[i - 1][0], STDIN_FILENO) < 0) {
+                    perror("dup2");
+                    _exit(1);
+                }
+            }
+
+            /* Set up stdout to next pipe */
+            if (i < n - 1) {
+                if (dup2(pipes[i][1], STDOUT_FILENO) < 0) {
+                    perror("dup2");
+                    _exit(1);
+                }
+            }
+
+            /* Close all pipe file descriptors in child */
+            for (size_t j = 0; j < n - 1; j++) {
+                close(pipes[j][0]);
+                close(pipes[j][1]);
+            }
+
+            /* Execute the command */
+            int status = exec_ast(pipeline->commands[i]);
+            _exit(status);
+        }
+
+        /* Parent process */
+        pids[i] = pid;
+    }
+
+    /* Close all pipes in parent */
+    for (size_t i = 0; i < n - 1; i++) {
+        close(pipes[i][0]);
+        close(pipes[i][1]);
+    }
+
+    /* Wait for all children and collect exit status of last command */
+    int last_status = 0;
+    for (size_t i = 0; i < n; i++) {
+        int wstatus = 0;
+        if (waitpid(pids[i], &wstatus, 0) < 0) {
+            perror("waitpid");
+            last_status = 1;
+            continue;
+        }
+
+        /* Only keep the status of the last command */
+        if (i == n - 1) {
+            if (WIFEXITED(wstatus))
+                last_status = WEXITSTATUS(wstatus);
+            else if (WIFSIGNALED(wstatus))
+                last_status = 128 + WTERMSIG(wstatus);
+            else
+                last_status = 1;
+        }
+    }
+
+    free(pipes);
+    free(pids);
+    return last_status;
+}
+
 int exec_ast(struct ast *n)
 {
     if (!n)
@@ -267,6 +393,9 @@ int exec_ast(struct ast *n)
 
     if (n->type == AST_IF)
         return exec_if(&n->as.ifnode);
+
+    if (n->type == AST_PIPELINE)
+        return exec_pipeline(&n->as.pipeline);
 
     return 1;
 }

@@ -10,6 +10,7 @@ enum token_type {
     TOK_FI,
     TOK_SEMI,
     TOK_NL,
+    TOK_PIPE,           /* | */
     /* Redirections */
     TOK_REDIR_IN,       /* < */
     TOK_REDIR_OUT,      /* > */
